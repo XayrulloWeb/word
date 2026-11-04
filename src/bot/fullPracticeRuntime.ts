@@ -30,7 +30,7 @@ export interface FullPracticePayload {
 }
 
 export const isFullPracticeCallbackData = (data: string): boolean => {
-  return data.startsWith('fp_ans:') || data === 'fp_stop';
+  return data.startsWith('fp_ans:') || data === 'fp_stop' || data === 'fp_dont_know';
 };
 
 export const isFullPracticeSession = (session: UserSession | null | undefined): boolean => {
@@ -120,6 +120,7 @@ export const createFullPracticeRuntime = (deps: {
       Markup.button.callback(opt, `fp_ans:${idx}`),
     ]);
     inlineKeyboardRows.push([
+      Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
       Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
     ]);
 
@@ -234,7 +235,15 @@ export const createFullPracticeRuntime = (deps: {
     const pairHtml = `<b>${escapeHtml(payload.wordEn)}</b> — <b>${escapeHtml(payload.translationRu)}</b>`;
 
     let feedback: string;
-    if (isCorrect) {
+    const isExplicitDontKnow =
+      userGivenAnswer === 'Не знаю' || userGivenAnswer === 'Bilmayman' || userGivenAnswer === '?';
+
+    if (isExplicitDontKnow) {
+      feedback =
+        lang === 'uz'
+          ? `💡 <b>To‘g‘ri javob:</b>\n${pairHtml}`
+          : `💡 <b>Правильный перевод:</b>\n${pairHtml}`;
+    } else if (isCorrect) {
       feedback =
         lang === 'uz'
           ? `✅ <b>To‘g‘ri!</b>\n${pairHtml}`
@@ -263,6 +272,21 @@ export const createFullPracticeRuntime = (deps: {
       await ctx.answerCbQuery();
       const payload = session.payload as FullPracticePayload | undefined;
       await stopPractice(ctx, userId, lang, payload?.stats);
+      return;
+    }
+
+    if (data === 'fp_dont_know') {
+      await ctx.answerCbQuery();
+      const payload = session.payload as FullPracticePayload | undefined;
+      if (!payload) return;
+      await handleAnswerEvaluation(
+        ctx,
+        userId,
+        lang,
+        payload,
+        false,
+        lang === 'uz' ? 'Bilmayman' : 'Не знаю'
+      );
       return;
     }
 
@@ -310,6 +334,26 @@ export const createFullPracticeRuntime = (deps: {
     const payload = session.payload as FullPracticePayload | undefined;
     if (!payload || !payload.correctAnswer) {
       await stopPractice(ctx, userId, lang);
+      return;
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (
+      lower === 'не знаю' ||
+      lower === 'хз' ||
+      lower === '?' ||
+      lower === 'dont know' ||
+      lower === "don't know" ||
+      lower === 'bilmayman'
+    ) {
+      await handleAnswerEvaluation(
+        ctx,
+        userId,
+        lang,
+        payload,
+        false,
+        lang === 'uz' ? 'Bilmayman' : 'Не знаю'
+      );
       return;
     }
 
