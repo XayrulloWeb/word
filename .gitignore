@@ -17,3 +17,6 @@ prisma/generated
 src/generated
 
 /src/generated/prisma
+*.pem
+xayrullo.pem
+
