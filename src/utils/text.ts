@@ -17,15 +17,36 @@ export const normalizeAnswer = (text: string): string => {
   return stripTrailingPunctuation(normalizeBasic(text));
 };
 
+const stripEnglishInfinitive = (text: string): string => text.replace(/^to\s+/i, '');
+
 export const normalizeEnglish = (text: string): string => {
   const cleaned = normalizeAnswer(text);
-  return stripArticles(cleaned);
+  const withoutArticles = stripArticles(cleaned);
+  return stripEnglishInfinitive(withoutArticles);
 };
 
 export const answersEqual = (expected: string, actual: string): boolean => {
-  return normalizeAnswer(expected) === normalizeAnswer(actual);
+  const normExpected = normalizeAnswer(expected);
+  const normActual = normalizeAnswer(actual);
+  if (normExpected === normActual) {
+    return true;
+  }
+  const parts = expected
+    .split(/[,;/]+/)
+    .map((p) => normalizeAnswer(p.replace(/\(.*?\)/g, '')))
+    .filter(Boolean);
+  return parts.includes(normActual);
 };
 
 export const answersEqualEnglish = (expected: string, actual: string): boolean => {
-  return normalizeEnglish(expected) === normalizeEnglish(actual);
+  const normExpected = normalizeEnglish(expected);
+  const normActual = normalizeEnglish(actual);
+  if (normExpected === normActual) {
+    return true;
+  }
+  const parts = expected
+    .split(/[,;/]+/)
+    .map((p) => normalizeEnglish(p.replace(/\(.*?\)/g, '')))
+    .filter(Boolean);
+  return parts.includes(normActual);
 };

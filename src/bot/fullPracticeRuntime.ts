@@ -71,19 +71,11 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
-    // Direction: 65% EN -> RU, 35% RU -> EN
-    const isEnToRu = Math.random() < 0.65;
+    // Direction: 50% EN -> RU, 50% RU -> EN
+    const isEnToRu = Math.random() < 0.5;
     const direction: 'EN_TO_RU' | 'RU_TO_EN' = isEnToRu ? 'EN_TO_RU' : 'RU_TO_EN';
     const questionPrompt = isEnToRu ? target.wordEn : target.translationRu;
     const correctAnswer = isEnToRu ? target.translationRu : target.wordEn;
-
-    // Pick 3 distractors
-    const otherWords = userWords.filter((w) => w.id !== target.id);
-    const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
-    const distractorAnswers = shuffledOthers.slice(0, 3).map((w) => (isEnToRu ? w.translationRu : w.wordEn));
-
-    // Combine and shuffle options
-    const options = [correctAnswer, ...distractorAnswers].sort(() => 0.5 - Math.random());
 
     const payload: FullPracticePayload = {
       mode: 'full_practice',
@@ -94,7 +86,7 @@ export const createFullPracticeRuntime = (deps: {
       direction,
       questionPrompt,
       correctAnswer,
-      options,
+      options: [],
     };
 
     await setState(userId, 'QUIZ_ACTIVE', {
@@ -105,24 +97,26 @@ export const createFullPracticeRuntime = (deps: {
 
     const questionNumber = stats.total + 1;
     const fromFlag = isEnToRu ? '🇬🇧' : '🇷🇺';
-    const toFlag = isEnToRu ? '🇷🇺' : '🇬🇧';
+    const targetLangName = isEnToRu
+      ? (lang === 'uz' ? 'o‘zbekcha/ruscha' : 'русском')
+      : (lang === 'uz' ? 'inglizcha' : 'английском');
 
     const header =
       lang === 'uz'
         ? `❓ <b>Savol #${questionNumber}</b> (Natija: ${stats.correct}/${stats.total})\n` +
           `So‘z: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
-          `To‘g‘ri ${toFlag} tarjimani tanlang yoki matn bilan yozing:`
+          `✍️ <b>${targetLangName}</b> tarjimasini yozing:`
         : `❓ <b>Вопрос #${questionNumber}</b> (Счёт: ${stats.correct}/${stats.total})\n` +
           `Слово: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
-          `Выберите правильный ${toFlag} перевод или напишите сообщением:`;
+          `✍️ Напишите перевод на <b>${targetLangName}</b>:`;
 
-    const inlineKeyboardRows = options.map((opt, idx) => [
-      Markup.button.callback(opt, `fp_ans:${idx}`),
-    ]);
-    inlineKeyboardRows.push([
-      Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
-      Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
-    ]);
+    // Only "Don't know" and "Stop" buttons - user types their own answer
+    const inlineKeyboardRows = [
+      [
+        Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
+        Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
+      ],
+    ];
 
     await ctx.reply(header, {
       parse_mode: 'HTML',
@@ -182,9 +176,11 @@ export const createFullPracticeRuntime = (deps: {
       lang === 'uz'
         ? `🚀 <b>To‘liq so‘rov boshlandi!</b>\n` +
           `Lug‘atdagi jami <b>${wordCount}</b> ta so‘z bo‘yicha to‘xtovsiz so‘rov.\n` +
+          `Tarjimalarni xabarlar orqali yozib yuboring.\n` +
           `To‘xtatish uchun istalgan vaqtda <b>«🛑 So‘rovni to‘xtatish»</b> tugmasini bosing.`
         : `🚀 <b>Бесконечный опрос запущен!</b>\n` +
-          `Тренировка по всем <b>${wordCount}</b> словам словаря без пауз.\n` +
+          `Тренировка по всем <b>${wordCount}</b> словам словаря.\n` +
+          `Пишите перевод сообщением прямо в чат.\n` +
           `Когда захотите сделать паузу, нажмите кнопку <b>«🛑 Остановить опрос»</b>.`;
 
     await ctx.reply(startNotice, {
@@ -251,8 +247,8 @@ export const createFullPracticeRuntime = (deps: {
     } else {
       feedback =
         lang === 'uz'
-          ? `❌ <b>Xato!</b> (Siz tanladingiz: <i>${escapeHtml(userGivenAnswer)}</i>)\nTo‘g‘ri javob: ${pairHtml}`
-          : `❌ <b>Неверно!</b> (Ваш ответ: <i>${escapeHtml(userGivenAnswer)}</i>)\nПравильный перевод: ${pairHtml}`;
+          ? `❌ <b>Noto‘g‘ri!</b> (Sizning javobingiz: <i>${escapeHtml(userGivenAnswer)}</i>)\n💡 <b>To‘g‘ri javob:</b>\n${pairHtml}`
+          : `❌ <b>Неверно!</b> (Ваш ответ: <i>${escapeHtml(userGivenAnswer)}</i>)\n💡 <b>Правильный перевод:</b>\n${pairHtml}`;
     }
 
     await ctx.reply(feedback, { parse_mode: 'HTML' });
