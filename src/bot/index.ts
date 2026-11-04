@@ -162,11 +162,17 @@ const ROCKET_GAME_BUTTON_BY_LANG: Record<Lang, string> = {
 const ROCKET_GAME_BUTTONS = Object.values(ROCKET_GAME_BUTTON_BY_LANG);
 
 
+const SETTINGS_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '⚙️ Настройки',
+  uz: '⚙️ Sozlamalar',
+};
+const SETTINGS_BUTTONS = Object.values(SETTINGS_BUTTON_BY_LANG);
+
 const mainReplyKeyboard = (lang: Lang) =>
   Markup.keyboard([
     [FULL_PRACTICE_BUTTON_BY_LANG[lang]],
     [ADD_WORD_BUTTON_BY_LANG[lang], MY_WORDS_BUTTON_BY_LANG[lang]],
-    [STATS_BUTTON_BY_LANG[lang]],
+    [STATS_BUTTON_BY_LANG[lang], SETTINGS_BUTTON_BY_LANG[lang]],
   ]).resize().persistent(true);
 
 const stopPracticeReplyKeyboard = (lang: Lang) =>
@@ -452,15 +458,7 @@ bot.command('add', async (ctx) => {
 bot.command('settings', async (ctx) => {
   if (!ctx.from) return;
   const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
-  const lang = (user.language as Lang) || 'ru';
-  if (!webAppUrl) {
-    await ctx.reply(webAppUnavailableText, { parse_mode: 'HTML' });
-    return;
-  }
-  await ctx.reply(lang === 'uz' ? 'Sozlamalar ilovada' : 'Настройки в приложении', {
-    parse_mode: 'HTML',
-    ...openWebAppKeyboard(lang),
-  });
+  await settingsRuntime.sendSettings(ctx, Number(user.id), 'main');
 });
 
 bot.command('stats', async (ctx) => {
@@ -534,6 +532,15 @@ bot.hears(STATS_BUTTONS, async (ctx) => {
   const session = await getSession(BigInt(user.id));
   if (await replyIfOnboardingPending(ctx, session, lang)) return;
   await showUserStats(ctx, user, lang);
+});
+
+bot.hears(SETTINGS_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(user.id));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await settingsRuntime.sendSettings(ctx, Number(user.id), 'main');
 });
 
 bot.hears(QUIZ_BUTTONS, async (ctx) => {
