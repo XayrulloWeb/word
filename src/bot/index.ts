@@ -57,11 +57,16 @@ import type { Lang } from '../i18n';
 import { t } from '../i18n';
 import { isNewsDigestCallbackData } from './newsDigestCallbackData';
 import { createNewsDigestRuntime } from './newsDigestRuntime';
-import { NEWS_DIGEST_BUTTON_BY_LANG, NEWS_DIGEST_BUTTONS } from './newsDigestUi';
+import { NEWS_DIGEST_BUTTONS } from './newsDigestUi';
 import { isQuizCallbackData } from './quizCallbackData';
 import { createQuizRuntime } from './quizRuntime';
 import { isSettingsCallbackData } from './settingsCallbackData';
 import { createSettingsRuntime } from './settingsRuntime';
+import {
+  createFullPracticeRuntime,
+  isFullPracticeCallbackData,
+  isFullPracticeSession,
+} from './fullPracticeRuntime';
 
 validateRuntimeEnv('bot');
 const botLogger = createLogger('bot');
@@ -114,6 +119,36 @@ if (rawWebAppUrl && !webAppUrl) {
 const webAppLabel = (lang: Lang) => (lang === 'uz' ? 'Ilova' : 'Приложение');
 
 
+const FULL_PRACTICE_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '🚀 Начать опрос (Фулл)',
+  uz: '🚀 To‘liq so‘rov (Full)',
+};
+const FULL_PRACTICE_BUTTONS = Object.values(FULL_PRACTICE_BUTTON_BY_LANG);
+
+const ADD_WORD_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '➕ Добавить слово',
+  uz: '➕ So‘z qo‘shish',
+};
+const ADD_WORD_BUTTONS = Object.values(ADD_WORD_BUTTON_BY_LANG);
+
+const MY_WORDS_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '📖 Мои слова',
+  uz: '📖 Mening so‘zlarim',
+};
+const MY_WORDS_BUTTONS = Object.values(MY_WORDS_BUTTON_BY_LANG);
+
+const STATS_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '📊 Статистика',
+  uz: '📊 Statistika',
+};
+const STATS_BUTTONS = Object.values(STATS_BUTTON_BY_LANG);
+
+const STOP_PRACTICE_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '🛑 Остановить опрос',
+  uz: '🛑 So‘rovni to‘xtatish',
+};
+const STOP_PRACTICE_BUTTONS = Object.values(STOP_PRACTICE_BUTTON_BY_LANG);
+
 const QUIZ_BUTTON_BY_LANG: Record<Lang, string> = {
   ru: '\u{1F9E0} Quiz',
   uz: '\u{1F9E0} Quiz',
@@ -126,14 +161,17 @@ const ROCKET_GAME_BUTTON_BY_LANG: Record<Lang, string> = {
 };
 const ROCKET_GAME_BUTTONS = Object.values(ROCKET_GAME_BUTTON_BY_LANG);
 
-const rocketGameReplyButton = (lang: Lang) => {
-  return ROCKET_GAME_BUTTON_BY_LANG[lang];
-};
 
 const mainReplyKeyboard = (lang: Lang) =>
   Markup.keyboard([
-    [NEWS_DIGEST_BUTTON_BY_LANG[lang], QUIZ_BUTTON_BY_LANG[lang]],
-    [rocketGameReplyButton(lang)],
+    [FULL_PRACTICE_BUTTON_BY_LANG[lang]],
+    [ADD_WORD_BUTTON_BY_LANG[lang], MY_WORDS_BUTTON_BY_LANG[lang]],
+    [STATS_BUTTON_BY_LANG[lang]],
+  ]).resize().persistent(true);
+
+const stopPracticeReplyKeyboard = (lang: Lang) =>
+  Markup.keyboard([
+    [STOP_PRACTICE_BUTTON_BY_LANG[lang]],
   ]).resize().persistent(true);
 const openWebAppKeyboard = (lang: Lang, params?: Record<string, string>, label?: string) => {
   const url = buildWebAppUrl(params);
@@ -165,6 +203,80 @@ const settingsRuntime = createSettingsRuntime({
 const quizRuntime = createQuizRuntime({ bot, mainReplyKeyboard, buildGuideLinkText });
 export const runQuizQuestionTimeout = quizRuntime.runQuizQuestionTimeout;
 export const restoreActiveQuizTimeouts = quizRuntime.restoreActiveQuizTimeouts;
+
+const fullPracticeRuntime = createFullPracticeRuntime({
+  mainReplyKeyboard,
+  stopReplyKeyboard: stopPracticeReplyKeyboard,
+});
+
+const showUserWords = async (ctx: Context, userId: bigint, lang: Lang) => {
+  const totalCount = await prisma.word.count({ where: { userId } });
+  if (totalCount === 0) {
+    const emptyText =
+      lang === 'uz'
+        ? 'Lug‘atingizda hozircha so‘zlar yo‘q. Yangi so‘z qo‘shish uchun «➕ So‘z qo‘shish» tugmasini bosing.'
+        : 'В вашем словаре пока нет слов. Нажмите «➕ Добавить слово», чтобы добавить первое слово!';
+    await ctx.reply(emptyText, { parse_mode: 'HTML', ...mainReplyKeyboard(lang) });
+    return;
+  }
+
+  const sampleWords = await prisma.word.findMany({
+    where: { userId },
+    take: 20,
+    orderBy: { createdAt: 'desc' },
+    select: { wordEn: true, translationRu: true },
+  });
+
+  const lines = sampleWords.map(
+    (w, i) => `${i + 1}. 🇬🇧 <b>${escapeHtml(w.wordEn)}</b> — 🇷🇺 ${escapeHtml(w.translationRu)}`
+  );
+
+  const moreCount = totalCount > 20 ? totalCount - 20 : 0;
+  const moreText = moreCount > 0
+    ? (lang === 'uz' ? `\n\n<i>...va yana ${moreCount} ta so‘z</i>` : `\n\n<i>...и ещё ${moreCount} слов</i>`)
+    : '';
+
+  const title =
+    lang === 'uz'
+      ? `📖 <b>Lug‘atingizdagi so‘zlar</b> (jami: <b>${totalCount}</b>):\n\n`
+      : `📖 <b>Ваш словарь</b> (всего слов: <b>${totalCount}</b>):\n\n`;
+
+  const footer =
+    lang === 'uz'
+      ? `\n\n💡 <i>Mashg‘ulotni boshlash uchun «🚀 To‘liq so‘rov» tugmasini bosing!</i>`
+      : `\n\n💡 <i>Чтобы начать тренировку, нажмите «🚀 Начать опрос (Фулл)»!</i>`;
+
+  await ctx.reply(`${title}${lines.join('\n')}${moreText}${footer}`, {
+    parse_mode: 'HTML',
+    ...mainReplyKeyboard(lang),
+  });
+};
+
+const showUserStats = async (ctx: Context, user: { id: bigint | number; streakCount?: number | null; doneTodayCount?: number | null }, lang: Lang) => {
+  const userId = BigInt(user.id);
+  const wordCount = await prisma.word.count({ where: { userId } });
+  const reviewCount = await prisma.review.count({ where: { userId } });
+  const streak = user.streakCount ?? 0;
+  const doneToday = user.doneTodayCount ?? 0;
+
+  const statsText =
+    lang === 'uz'
+      ? `📊 <b>Sizning statistikangiz:</b>\n\n` +
+        `📚 Lug‘atdagi so‘zlar: <b>${wordCount}</b> ta\n` +
+        `🗂 Takrorlash kartalari: <b>${reviewCount}</b> ta\n` +
+        `✅ Bugun takrorlangan: <b>${doneToday}</b>\n` +
+        `🔥 Kunlik ketma-ketlik: <b>${streak} kun</b>`
+      : `📊 <b>Ваша статистика:</b>\n\n` +
+        `📚 Слов в словаре: <b>${wordCount}</b>\n` +
+        `🗂 Карточек для повторения: <b>${reviewCount}</b>\n` +
+        `✅ Повторено сегодня: <b>${doneToday}</b>\n` +
+        `🔥 Серия дней: <b>${streak} дн.</b>`;
+
+  await ctx.reply(statsText, {
+    parse_mode: 'HTML',
+    ...mainReplyKeyboard(lang),
+  });
+};
 
 const toTelegramProfile = (from?: Context['from']): TelegramProfile | undefined => {
   if (!from) return undefined;
@@ -355,17 +467,74 @@ bot.command('stats', async (ctx) => {
   if (!ctx.from) return;
   const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
   const lang = (user.language as Lang) || 'ru';
-  if (!webAppUrl) {
-    await ctx.reply(webAppUnavailableText, { parse_mode: 'HTML' });
-    return;
-  }
-  await ctx.reply(lang === 'uz' ? 'Statistika ilovada' : 'Статистика в приложении', {
-    parse_mode: 'HTML',
-    ...openWebAppKeyboard(lang),
-  });
+  await showUserStats(ctx, user, lang);
 });
 
+bot.command('practice', async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang);
+});
 
+bot.command('stop', async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  await fullPracticeRuntime.stopPractice(ctx, BigInt(user.id), lang);
+});
+
+bot.command('words', async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  await showUserWords(ctx, BigInt(user.id), lang);
+});
+
+bot.hears(FULL_PRACTICE_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(user.id));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang);
+});
+
+bot.hears(STOP_PRACTICE_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  await fullPracticeRuntime.stopPractice(ctx, BigInt(user.id), lang);
+});
+
+bot.hears(ADD_WORD_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const userId = ctx.from.id;
+  const user = await ensureUser(userId, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(userId));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await setState(BigInt(userId), 'ADDING_WORD_WAIT_EN');
+  await ctx.reply(t(lang, 'add.enter'), { parse_mode: 'HTML' });
+});
+
+bot.hears(MY_WORDS_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(user.id));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await showUserWords(ctx, BigInt(user.id), lang);
+});
+
+bot.hears(STATS_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(user.id));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await showUserStats(ctx, user, lang);
+});
 
 bot.hears(QUIZ_BUTTONS, async (ctx) => {
   if (!ctx.from) return;
@@ -412,6 +581,19 @@ bot.on('text', async (ctx) => {
   const lang = (user.language as Lang) || 'ru';
   const session = await getSession(BigInt(userId));
   const text = normalizeWhitespace(ctx.message.text);
+
+  if (
+    text === '🛑 Остановить опрос' ||
+    text === '🛑 So‘rovni to‘xtatish' ||
+    text === '/stop' ||
+    text.toLowerCase() === 'стоп' ||
+    text.toLowerCase() === 'stop'
+  ) {
+    if (isFullPracticeSession(session)) {
+      await fullPracticeRuntime.stopPractice(ctx, BigInt(userId), lang);
+      return;
+    }
+  }
 
   const findExistingWord = async (wordEn: string) => {
     return findExistingWordByNormalizedEn(BigInt(userId), wordEn);
@@ -806,6 +988,10 @@ bot.on('text', async (ctx) => {
       break;
     }
     case 'QUIZ_ACTIVE': {
+      if (isFullPracticeSession(session)) {
+        await fullPracticeRuntime.handleFullPracticeText(ctx, BigInt(userId), lang, text, session);
+        break;
+      }
       await quizRuntime.handleQuizActiveText(ctx, BigInt(userId), lang, text, session);
       break;
     }
@@ -851,6 +1037,13 @@ bot.on('callback_query', async (ctx) => {
       }),
       { parse_mode: 'HTML' }
     );
+    return;
+  }
+
+  if (isFullPracticeCallbackData(data)) {
+    const user = await ensureUser(userId, toTelegramProfile(ctx.from));
+    const lang = (user.language as Lang) || 'ru';
+    await fullPracticeRuntime.handleFullPracticeCallback(ctx, BigInt(userId), lang, data, session);
     return;
   }
 
@@ -1191,6 +1384,15 @@ export const startBot = async () => {
   // We only run this after a short delay so that synchronous errors from launch (in tests or bad webhooks) throw first
   botHealth.markOk('bot launched');
   botLogger.info('bot launched', { webAppConfigured: Boolean(webAppUrl) });
+  void bot.telegram.setMyCommands([
+    { command: 'start', description: '🔄 Главное меню' },
+    { command: 'practice', description: '🚀 Начать опрос всех слов' },
+    { command: 'stop', description: '🛑 Остановить опрос' },
+    { command: 'add', description: '➕ Добавить слово' },
+    { command: 'words', description: '📖 Мои слова' },
+    { command: 'stats', description: '📊 Статистика' },
+    { command: 'menu', description: '📱 Меню кнопок' },
+  ]).catch(() => {});
   void restoreActiveQuizTimeouts().catch((error) => {
     botHealth.markError(error instanceof Error ? error.message : 'quiz restore failed');
     botLogger.error('quiz restore failed', { error });

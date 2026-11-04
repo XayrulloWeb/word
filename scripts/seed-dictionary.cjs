@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 require('dotenv').config();
 const { prisma } = require('../dist/db/client.js');
 const { addWordForUser } = require('../dist/services/reviewService.js');
