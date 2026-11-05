@@ -26,11 +26,55 @@ export interface FullPracticePayload {
   questionPrompt: string;
   correctAnswer: string;
   options: string[];
+  baseHeader?: string;
+  hintPresses?: number;
   [key: string]: unknown;
 }
 
+export const generateSmartHint = (text: string, press: number): string => {
+  const words = text.trim().split(/\s+/);
+  return words
+    .map((word) => {
+      const chars = Array.from(word);
+      const letterIdxs: number[] = [];
+      chars.forEach((c, i) => {
+        if (/[\p{L}\p{N}]/u.test(c)) letterIdxs.push(i);
+      });
+
+      if (letterIdxs.length <= 1) return chars.join(' ');
+
+      const revealed = new Set<number>();
+      // Press 1: reveal 1st letter
+      if (letterIdxs[0] !== undefined) revealed.add(letterIdxs[0]);
+
+      // Press 2: reveal 2nd letter
+      if (press >= 2 && letterIdxs[1] !== undefined) {
+        revealed.add(letterIdxs[1]);
+      }
+
+      // Press 3: reveal last letter and 3rd letter if long enough
+      if (press >= 3) {
+        const lastIdx = letterIdxs[letterIdxs.length - 1];
+        if (lastIdx !== undefined) revealed.add(lastIdx);
+        if (letterIdxs.length >= 5 && letterIdxs[2] !== undefined) {
+          revealed.add(letterIdxs[2]);
+        }
+      }
+
+      return chars
+        .map((c, i) => (revealed.has(i) ? c : /[\p{L}\p{N}]/u.test(c) ? '_' : c))
+        .join(' ');
+    })
+    .join('   ');
+};
+
 export const isFullPracticeCallbackData = (data: string): boolean => {
-  return data.startsWith('fp_ans:') || data === 'fp_stop' || data === 'fp_dont_know';
+  return (
+    data.startsWith('fp_ans:') ||
+    data === 'fp_stop' ||
+    data === 'fp_dont_know' ||
+    data === 'fp_hint'
+  );
 };
 
 export const isFullPracticeSession = (session: UserSession | null | undefined): boolean => {
@@ -77,24 +121,6 @@ export const createFullPracticeRuntime = (deps: {
     const questionPrompt = isEnToRu ? target.wordEn : target.translationRu;
     const correctAnswer = isEnToRu ? target.translationRu : target.wordEn;
 
-    const payload: FullPracticePayload = {
-      mode: 'full_practice',
-      stats,
-      currentWordId: target.id,
-      wordEn: target.wordEn,
-      translationRu: target.translationRu,
-      direction,
-      questionPrompt,
-      correctAnswer,
-      options: [],
-    };
-
-    await setState(userId, 'QUIZ_ACTIVE', {
-      wordId: target.id,
-      direction,
-      payload,
-    });
-
     const questionNumber = stats.total + 1;
     const fromFlag = isEnToRu ? '🇬🇧' : '🇷🇺';
     const targetLangName = isEnToRu
@@ -110,10 +136,32 @@ export const createFullPracticeRuntime = (deps: {
           `Слово: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
           `✍️ Напишите перевод на <b>${targetLangName}</b>:`;
 
-    // Only "Don't know" and "Stop" buttons - user types their own answer
+    const payload: FullPracticePayload = {
+      mode: 'full_practice',
+      stats,
+      currentWordId: target.id,
+      wordEn: target.wordEn,
+      translationRu: target.translationRu,
+      direction,
+      questionPrompt,
+      correctAnswer,
+      options: [],
+      baseHeader: header,
+      hintPresses: 0,
+    };
+
+    await setState(userId, 'QUIZ_ACTIVE', {
+      wordId: target.id,
+      direction,
+      payload,
+    });
+
     const inlineKeyboardRows = [
       [
+        Markup.button.callback(lang === 'uz' ? '💡 Maslahat' : '💡 Подсказка', 'fp_hint'),
         Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
+      ],
+      [
         Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
       ],
     ];
@@ -286,6 +334,65 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
+    if (data === 'fp_hint') {
+      const payload = session.payload as FullPracticePayload | undefined;
+      if (!payload) {
+        await ctx.answerCbQuery(lang === 'uz' ? 'Xatolik' : 'Ошибка');
+        return;
+      }
+
+      const targetWord = (payload.direction === 'RU_TO_EN' ? payload.wordEn : payload.translationRu)
+        .split(/[,;/]+/)[0]
+        ?.trim() || payload.correctAnswer;
+
+      const currentPress = Number(payload.hintPresses ?? 0) || 0;
+      if (currentPress >= 3) {
+        await ctx.answerCbQuery(
+          lang === 'uz' ? 'Barcha ishoralar ko‘rsatildi (3/3)!' : 'Все подсказки уже открыты (3/3)!'
+        );
+        return;
+      }
+
+      const nextPress = currentPress + 1;
+      const masked = generateSmartHint(targetWord, nextPress);
+
+      await ctx.answerCbQuery(lang === 'uz' ? `💡 Ishora (${nextPress}/3)` : `💡 Подсказка (${nextPress}/3)`);
+
+      const updatedPayload: FullPracticePayload = {
+        ...payload,
+        hintPresses: nextPress,
+      };
+
+      await prisma.userSession.update({
+        where: { userId },
+        data: { payload: updatedPayload as any },
+      });
+
+      const baseHeader = typeof payload.baseHeader === 'string' ? payload.baseHeader : '';
+      const hintLabel = lang === 'uz' ? '💡 <b>Ishora:</b>' : '💡 <b>Подсказка:</b>';
+      const newText = `${baseHeader}\n\n${hintLabel} <code>${escapeHtml(masked)}</code> (${nextPress}/3)`;
+
+      const inlineKeyboardRows = [
+        [
+          Markup.button.callback(lang === 'uz' ? '💡 Maslahat' : '💡 Подсказка', 'fp_hint'),
+          Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
+        ],
+        [
+          Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
+        ],
+      ];
+
+      try {
+        await ctx.editMessageText(newText, {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard(inlineKeyboardRows),
+        });
+      } catch {
+        // Fall back gracefully if edit fails
+      }
+      return;
+    }
+
     if (data.startsWith('fp_ans:')) {
       const idx = parseInt(data.replace('fp_ans:', ''), 10);
       const payload = session.payload as FullPracticePayload | undefined;
@@ -350,6 +457,37 @@ export const createFullPracticeRuntime = (deps: {
         false,
         lang === 'uz' ? 'Bilmayman' : 'Не знаю'
       );
+      return;
+    }
+
+    if (
+      lower === 'подсказка' ||
+      lower === 'подскажи' ||
+      lower === 'hint' ||
+      lower === 'help' ||
+      lower === 'ishora' ||
+      lower === 'maslahat'
+    ) {
+      const currentPress = Number(payload.hintPresses ?? 0) || 0;
+      const nextPress = Math.min(3, currentPress + 1);
+      const targetWord = (payload.direction === 'RU_TO_EN' ? payload.wordEn : payload.translationRu)
+        .split(/[,;/]+/)[0]
+        ?.trim() || payload.correctAnswer;
+      const masked = generateSmartHint(targetWord, nextPress);
+
+      const updatedPayload: FullPracticePayload = {
+        ...payload,
+        hintPresses: nextPress,
+      };
+      await prisma.userSession.update({
+        where: { userId },
+        data: { payload: updatedPayload as any },
+      });
+
+      const hintLabel = lang === 'uz' ? '💡 <b>Ishora:</b>' : '💡 <b>Подсказка:</b>';
+      await ctx.reply(`${hintLabel} <code>${escapeHtml(masked)}</code> (${nextPress}/3)`, {
+        parse_mode: 'HTML',
+      });
       return;
     }
 
