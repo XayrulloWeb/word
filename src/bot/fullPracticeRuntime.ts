@@ -8,6 +8,7 @@ import { applyRating } from '../services/reviewService';
 import { recordCompletion } from '../services/userService';
 import type { Lang } from '../i18n';
 import { escapeHtml } from '../utils/html';
+import { answersEqual, answersEqualEnglish } from '../utils/text';
 
 export interface FullPracticeStats {
   total: number;
@@ -16,8 +17,11 @@ export interface FullPracticeStats {
   [key: string]: unknown;
 }
 
+export type PracticeSubMode = 'typing' | 'choices';
+
 export interface FullPracticePayload {
   mode: 'full_practice';
+  subMode?: PracticeSubMode;
   stats: FullPracticeStats;
   currentWordId: number;
   wordEn: string;
@@ -89,7 +93,8 @@ export const createFullPracticeRuntime = (deps: {
     ctx: Context,
     userId: bigint,
     lang: Lang,
-    stats: FullPracticeStats
+    stats: FullPracticeStats,
+    subMode: PracticeSubMode = 'typing'
   ) => {
     const userWords = await prisma.word.findMany({
       where: { userId },
@@ -127,17 +132,36 @@ export const createFullPracticeRuntime = (deps: {
       ? (lang === 'uz' ? 'o‘zbekcha/ruscha' : 'русском')
       : (lang === 'uz' ? 'inglizcha' : 'английском');
 
+    let options: string[] = [];
+    if (subMode === 'choices') {
+      const otherWords = userWords.filter((w) => w.id !== target.id);
+      const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
+      const distractorAnswers = shuffledOthers
+        .slice(0, 3)
+        .map((w) => (isEnToRu ? w.translationRu : w.wordEn));
+      options = [correctAnswer, ...distractorAnswers].sort(() => 0.5 - Math.random());
+    }
+
     const header =
-      lang === 'uz'
-        ? `❓ <b>Savol #${questionNumber}</b> (Natija: ${stats.correct}/${stats.total})\n` +
-          `So‘z: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
-          `✍️ <b>${targetLangName}</b> tarjimasini yozing:`
-        : `❓ <b>Вопрос #${questionNumber}</b> (Счёт: ${stats.correct}/${stats.total})\n` +
-          `Слово: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
-          `✍️ Напишите перевод на <b>${targetLangName}</b>:`;
+      subMode === 'choices'
+        ? lang === 'uz'
+          ? `❓ <b>Savol #${questionNumber}</b> (Natija: ${stats.correct}/${stats.total})\n` +
+            `So‘z: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
+            `To‘g‘ri <b>${targetLangName}</b> tarjimani tanlang:`
+          : `❓ <b>Вопрос #${questionNumber}</b> (Счёт: ${stats.correct}/${stats.total})\n` +
+            `Слово: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
+            `Выберите правильный перевод на <b>${targetLangName}</b>:`
+        : lang === 'uz'
+          ? `❓ <b>Savol #${questionNumber}</b> (Natija: ${stats.correct}/${stats.total})\n` +
+            `So‘z: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
+            `✍️ <b>${targetLangName}</b> tarjimasini yozing:`
+          : `❓ <b>Вопрос #${questionNumber}</b> (Счёт: ${stats.correct}/${stats.total})\n` +
+            `Слово: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
+            `✍️ Напишите перевод на <b>${targetLangName}</b>:`;
 
     const payload: FullPracticePayload = {
       mode: 'full_practice',
+      subMode,
       stats,
       currentWordId: target.id,
       wordEn: target.wordEn,
@@ -145,7 +169,7 @@ export const createFullPracticeRuntime = (deps: {
       direction,
       questionPrompt,
       correctAnswer,
-      options: [],
+      options,
       baseHeader: header,
       hintPresses: 0,
     };
@@ -156,15 +180,26 @@ export const createFullPracticeRuntime = (deps: {
       payload,
     });
 
-    const inlineKeyboardRows = [
-      [
+    const inlineKeyboardRows: any[] = [];
+    if (subMode === 'choices') {
+      for (let idx = 0; idx < options.length; idx++) {
+        inlineKeyboardRows.push([
+          Markup.button.callback(options[idx]!, `fp_ans:${idx}`),
+        ]);
+      }
+      inlineKeyboardRows.push([
+        Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
+        Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
+      ]);
+    } else {
+      inlineKeyboardRows.push([
         Markup.button.callback(lang === 'uz' ? '💡 Maslahat' : '💡 Подсказка', 'fp_hint'),
         Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
-      ],
-      [
+      ]);
+      inlineKeyboardRows.push([
         Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
-      ],
-    ];
+      ]);
+    }
 
     await ctx.reply(header, {
       parse_mode: 'HTML',
@@ -191,14 +226,14 @@ export const createFullPracticeRuntime = (deps: {
           `• ✅ To‘g‘ri: <b>${stats ? stats.correct : 0}</b>\n` +
           `• ❌ Xato: <b>${stats ? stats.wrong : 0}</b>\n` +
           `• 🎯 Aniqlik: <b>${accuracy}%</b>\n\n` +
-          `Qayta boshlash uchun «🚀 To‘liq so‘rov» tugmasini bosing!`
+          `Qayta boshlash uchun pastdagi menyudan so‘rov turini tanlang!`
         : `🏁 <b>Опрос завершён!</b>\n\n` +
           `📊 <b>Результаты тренировки:</b>\n` +
           `• Всего вопросов: <b>${stats ? stats.total : 0}</b>\n` +
           `• ✅ Правильно: <b>${stats ? stats.correct : 0}</b>\n` +
           `• ❌ Ошибок: <b>${stats ? stats.wrong : 0}</b>\n` +
           `• 🎯 Точность: <b>${accuracy}%</b>\n\n` +
-          `Отличная работа! Чтобы продолжить опрос в любой момент, нажмите <b>«🚀 Начать опрос (Фулл)»</b>.`;
+          `Отличная работа! Чтобы продолжить в любой момент, выберите нужный режим опроса в меню.`;
 
     await ctx.reply(summaryText, {
       parse_mode: 'HTML',
@@ -206,7 +241,12 @@ export const createFullPracticeRuntime = (deps: {
     });
   };
 
-  const startFullPractice = async (ctx: Context, userId: bigint, lang: Lang) => {
+  const startFullPractice = async (
+    ctx: Context,
+    userId: bigint,
+    lang: Lang,
+    subMode: PracticeSubMode = 'typing'
+  ) => {
     const wordCount = await prisma.word.count({ where: { userId } });
     if (wordCount === 0) {
       const emptyText =
@@ -221,15 +261,25 @@ export const createFullPracticeRuntime = (deps: {
     }
 
     const startNotice =
-      lang === 'uz'
-        ? `🚀 <b>To‘liq so‘rov boshlandi!</b>\n` +
-          `Lug‘atdagi jami <b>${wordCount}</b> ta so‘z bo‘yicha to‘xtovsiz so‘rov.\n` +
-          `Tarjimalarni xabarlar orqali yozib yuboring.\n` +
-          `To‘xtatish uchun istalgan vaqtda <b>«🛑 So‘rovni to‘xtatish»</b> tugmasini bosing.`
-        : `🚀 <b>Бесконечный опрос запущен!</b>\n` +
-          `Тренировка по всем <b>${wordCount}</b> словам словаря.\n` +
-          `Пишите перевод сообщением прямо в чат.\n` +
-          `Когда захотите сделать паузу, нажмите кнопку <b>«🛑 Остановить опрос»</b>.`;
+      subMode === 'choices'
+        ? lang === 'uz'
+          ? `🚀 <b>To‘liq so‘rov (4 variant) boshlandi!</b>\n` +
+            `Lug‘atdagi jami <b>${wordCount}</b> ta so‘z bo‘yicha to‘xtovsiz so‘rov.\n` +
+            `Tugmalardan to‘g‘ri javobni tanlang.\n` +
+            `To‘xtatish uchun istalgan vaqtda <b>«🛑 So‘rovni to‘xtatish»</b> tugmasini bosing.`
+          : `🚀 <b>Опрос с 4 вариантами ответов запущен!</b>\n` +
+            `Тренировка по всем <b>${wordCount}</b> словам словаря.\n` +
+            `Выбирайте правильный ответ из 4 кнопок.\n` +
+            `Когда захотите сделать паузу, нажмите кнопку <b>«🛑 Остановить опрос»</b>.`
+        : lang === 'uz'
+          ? `🚀 <b>To‘liq so‘rov (Yozma) boshlandi!</b>\n` +
+            `Lug‘atdagi jami <b>${wordCount}</b> ta so‘z bo‘yicha to‘xtovsiz so‘rov.\n` +
+            `Tarjimalarni xabarlar orqali yozib yuboring (kerak bo‘lsa 💡 ishorani bosing).\n` +
+            `To‘xtatish uchun istalgan vaqtda <b>«🛑 So‘rovni to‘xtatish»</b> tugmasini bosing.`
+          : `🚀 <b>Опрос со вводом слова запущен!</b>\n` +
+            `Тренировка по всем <b>${wordCount}</b> словам словаря.\n` +
+            `Пишите перевод сообщением прямо в чат (при необходимости жмите 💡 Подсказка).\n` +
+            `Когда захотите сделать паузу, нажмите кнопку <b>«🛑 Остановить опрос»</b>.`;
 
     await ctx.reply(startNotice, {
       parse_mode: 'HTML',
@@ -237,7 +287,7 @@ export const createFullPracticeRuntime = (deps: {
     });
 
     const initialStats: FullPracticeStats = { total: 0, correct: 0, wrong: 0 };
-    await sendNextQuestion(ctx, userId, lang, initialStats);
+    await sendNextQuestion(ctx, userId, lang, initialStats, subMode);
   };
 
   const handleAnswerEvaluation = async (
@@ -302,7 +352,7 @@ export const createFullPracticeRuntime = (deps: {
     await ctx.reply(feedback, { parse_mode: 'HTML' });
 
     // IMMEDIATELY SEND NEXT QUESTION (Continuous!)
-    await sendNextQuestion(ctx, userId, lang, stats);
+    await sendNextQuestion(ctx, userId, lang, stats, payload.subMode || 'typing');
   };
 
   const handleFullPracticeCallback = async (
@@ -372,15 +422,26 @@ export const createFullPracticeRuntime = (deps: {
       const hintLabel = lang === 'uz' ? '💡 <b>Ishora:</b>' : '💡 <b>Подсказка:</b>';
       const newText = `${baseHeader}\n\n${hintLabel} <code>${escapeHtml(masked)}</code> (${nextPress}/3)`;
 
-      const inlineKeyboardRows = [
-        [
+      const inlineKeyboardRows: any[] = [];
+      if (payload.subMode === 'choices' && Array.isArray(payload.options) && payload.options.length > 0) {
+        for (let idx = 0; idx < payload.options.length; idx++) {
+          inlineKeyboardRows.push([
+            Markup.button.callback(payload.options[idx]!, `fp_ans:${idx}`),
+          ]);
+        }
+        inlineKeyboardRows.push([
+          Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
+          Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
+        ]);
+      } else {
+        inlineKeyboardRows.push([
           Markup.button.callback(lang === 'uz' ? '💡 Maslahat' : '💡 Подсказка', 'fp_hint'),
           Markup.button.callback(lang === 'uz' ? '🤷 Bilmayman' : '🤷 Не знаю ответ', 'fp_dont_know'),
-        ],
-        [
+        ]);
+        inlineKeyboardRows.push([
           Markup.button.callback(lang === 'uz' ? '🛑 To‘xtatish' : '🛑 Остановить опрос', 'fp_stop'),
-        ],
-      ];
+        ]);
+      }
 
       try {
         await ctx.editMessageText(newText, {
@@ -408,7 +469,10 @@ export const createFullPracticeRuntime = (deps: {
       if (!chosenOption) {
         return;
       }
-      const isCorrect = chosenOption.trim().toLowerCase() === payload.correctAnswer.trim().toLowerCase();
+      const isCorrect =
+        chosenOption.trim().toLowerCase() === payload.correctAnswer.trim().toLowerCase() ||
+        answersEqual(payload.correctAnswer, chosenOption) ||
+        answersEqualEnglish(payload.correctAnswer, chosenOption);
 
       await handleAnswerEvaluation(ctx, userId, lang, payload, isCorrect, chosenOption);
     }

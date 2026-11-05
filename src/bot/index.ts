@@ -119,6 +119,18 @@ if (rawWebAppUrl && !webAppUrl) {
 const webAppLabel = (lang: Lang) => (lang === 'uz' ? 'Ilova' : 'Приложение');
 
 
+const PRACTICE_TYPING_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '✍️ Опрос (Ввод слова)',
+  uz: '✍️ So‘rov (Yozma)',
+};
+const PRACTICE_TYPING_BUTTONS = Object.values(PRACTICE_TYPING_BUTTON_BY_LANG);
+
+const PRACTICE_CHOICES_BUTTON_BY_LANG: Record<Lang, string> = {
+  ru: '🔘 Опрос (4 варианта)',
+  uz: '🔘 So‘rov (4 variant)',
+};
+const PRACTICE_CHOICES_BUTTONS = Object.values(PRACTICE_CHOICES_BUTTON_BY_LANG);
+
 const FULL_PRACTICE_BUTTON_BY_LANG: Record<Lang, string> = {
   ru: '🚀 Начать опрос (Фулл)',
   uz: '🚀 To‘liq so‘rov (Full)',
@@ -170,7 +182,7 @@ const SETTINGS_BUTTONS = Object.values(SETTINGS_BUTTON_BY_LANG);
 
 const mainReplyKeyboard = (lang: Lang) =>
   Markup.keyboard([
-    [FULL_PRACTICE_BUTTON_BY_LANG[lang]],
+    [PRACTICE_TYPING_BUTTON_BY_LANG[lang], PRACTICE_CHOICES_BUTTON_BY_LANG[lang]],
     [ADD_WORD_BUTTON_BY_LANG[lang], MY_WORDS_BUTTON_BY_LANG[lang]],
     [STATS_BUTTON_BY_LANG[lang], SETTINGS_BUTTON_BY_LANG[lang]],
   ]).resize().persistent(true);
@@ -472,7 +484,14 @@ bot.command('practice', async (ctx) => {
   if (!ctx.from) return;
   const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
   const lang = (user.language as Lang) || 'ru';
-  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang);
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang, 'typing');
+});
+
+bot.command('quiz', async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang, 'choices');
 });
 
 bot.command('stop', async (ctx) => {
@@ -489,13 +508,31 @@ bot.command('words', async (ctx) => {
   await showUserWords(ctx, BigInt(user.id), lang);
 });
 
+bot.hears(PRACTICE_TYPING_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(user.id));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang, 'typing');
+});
+
+bot.hears(PRACTICE_CHOICES_BUTTONS, async (ctx) => {
+  if (!ctx.from) return;
+  const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
+  const lang = (user.language as Lang) || 'ru';
+  const session = await getSession(BigInt(user.id));
+  if (await replyIfOnboardingPending(ctx, session, lang)) return;
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang, 'choices');
+});
+
 bot.hears(FULL_PRACTICE_BUTTONS, async (ctx) => {
   if (!ctx.from) return;
   const user = await ensureUser(ctx.from.id, toTelegramProfile(ctx.from));
   const lang = (user.language as Lang) || 'ru';
   const session = await getSession(BigInt(user.id));
   if (await replyIfOnboardingPending(ctx, session, lang)) return;
-  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang);
+  await fullPracticeRuntime.startFullPractice(ctx, BigInt(user.id), lang, 'typing');
 });
 
 bot.hears(STOP_PRACTICE_BUTTONS, async (ctx) => {
