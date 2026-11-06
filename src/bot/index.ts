@@ -228,7 +228,19 @@ const fullPracticeRuntime = createFullPracticeRuntime({
 });
 
 const showUserWords = async (ctx: Context, userId: bigint, lang: Lang) => {
-  const totalCount = await prisma.word.count({ where: { userId } });
+  const words = await prisma.word.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      wordEn: true,
+      translationRu: true,
+      reviews: {
+        select: { stage: true },
+      },
+    },
+  });
+
+  const totalCount = words.length;
   if (totalCount === 0) {
     const emptyText =
       lang === 'uz'
@@ -238,33 +250,83 @@ const showUserWords = async (ctx: Context, userId: bigint, lang: Lang) => {
     return;
   }
 
-  const sampleWords = await prisma.word.findMany({
-    where: { userId },
-    take: 20,
-    orderBy: { createdAt: 'desc' },
-    select: { wordEn: true, translationRu: true },
-  });
+  const mastered: typeof words = [];
+  const inProgress: typeof words = [];
+  const brandNew: typeof words = [];
 
-  const lines = sampleWords.map(
-    (w, i) => `${i + 1}. 🇬🇧 <b>${escapeHtml(w.wordEn)}</b> — 🇷🇺 ${escapeHtml(w.translationRu)}`
-  );
+  for (const w of words) {
+    const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
+    if (maxStage >= 3) {
+      mastered.push(w);
+    } else if (maxStage >= 1) {
+      inProgress.push(w);
+    } else {
+      brandNew.push(w);
+    }
+  }
 
-  const moreCount = totalCount > 20 ? totalCount - 20 : 0;
-  const moreText = moreCount > 0
-    ? (lang === 'uz' ? `\n\n<i>...va yana ${moreCount} ta so‘z</i>` : `\n\n<i>...и ещё ${moreCount} слов</i>`)
-    : '';
+  let text = '';
+  if (lang === 'uz') {
+    text = `📖 <b>Lug‘atingiz (jami: ${totalCount} ta so‘z):</b>\n\n` +
+      `🏆 <b>Aniq bilasiz (Yodlangan):</b> <b>${mastered.length}</b> ta\n` +
+      `🟡 <b>O‘rganilmoqda:</b> <b>${inProgress.length}</b> ta\n` +
+      `⚪️ <b>Yangi so‘zlar:</b> <b>${brandNew.length}</b> ta\n\n`;
 
-  const title =
-    lang === 'uz'
-      ? `📖 <b>Lug‘atingizdagi so‘zlar</b> (jami: <b>${totalCount}</b>):\n\n`
-      : `📖 <b>Ваш словарь</b> (всего слов: <b>${totalCount}</b>):\n\n`;
+    if (mastered.length > 0) {
+      text += `🏆 <b>Yodlangan so‘zlar:</b>\n` +
+        mastered.slice(0, 10).map((w) => `• <b>${escapeHtml(w.wordEn)}</b> — ${escapeHtml(w.translationRu)} ⭐⭐⭐`).join('\n') +
+        (mastered.length > 10 ? `\n<i>...va yana ${mastered.length - 10} ta</i>` : '') + '\n\n';
+    }
 
-  const footer =
-    lang === 'uz'
-      ? `\n\n💡 <i>Mashg‘ulotni boshlash uchun «🚀 To‘liq so‘rov» tugmasini bosing!</i>`
-      : `\n\n💡 <i>Чтобы начать тренировку, нажмите «🚀 Начать опрос (Фулл)»!</i>`;
+    if (inProgress.length > 0) {
+      text += `🟡 <b>O‘rganilayotgan so‘zlar:</b>\n` +
+        inProgress.slice(0, 10).map((w) => {
+          const s = Math.min(3, Math.max(0, ...w.reviews.map((r) => r.stage)));
+          const stars = '⭐'.repeat(s) + '☆'.repeat(3 - s);
+          return `• <b>${escapeHtml(w.wordEn)}</b> — ${escapeHtml(w.translationRu)} (${stars})`;
+        }).join('\n') +
+        (inProgress.length > 10 ? `\n<i>...va yana ${inProgress.length - 10} ta</i>` : '') + '\n\n';
+    }
 
-  await ctx.reply(`${title}${lines.join('\n')}${moreText}${footer}`, {
+    if (brandNew.length > 0) {
+      text += `⚪️ <b>Yangi so‘zlar:</b>\n` +
+        brandNew.slice(0, 10).map((w) => `• <b>${escapeHtml(w.wordEn)}</b> — ${escapeHtml(w.translationRu)}`).join('\n') +
+        (brandNew.length > 10 ? `\n<i>...va yana ${brandNew.length - 10} ta</i>` : '') + '\n\n';
+    }
+
+    text += `💡 <i>O‘rganishni davom ettirish uchun pastdagi so‘rov tugmasini bosing!</i>`;
+  } else {
+    text = `📖 <b>Ваш словарь (всего: ${totalCount} слов):</b>\n\n` +
+      `🏆 <b>Выучено (точно знаете):</b> <b>${mastered.length}</b>\n` +
+      `🟡 <b>На изучении:</b> <b>${inProgress.length}</b>\n` +
+      `⚪️ <b>Новые слова:</b> <b>${brandNew.length}</b>\n\n`;
+
+    if (mastered.length > 0) {
+      text += `🏆 <b>Выученные слова:</b>\n` +
+        mastered.slice(0, 10).map((w) => `• <b>${escapeHtml(w.wordEn)}</b> — ${escapeHtml(w.translationRu)} ⭐⭐⭐`).join('\n') +
+        (mastered.length > 10 ? `\n<i>...и ещё ${mastered.length - 10} слов</i>` : '') + '\n\n';
+    }
+
+    if (inProgress.length > 0) {
+      text += `🟡 <b>Слова на изучении:</b>\n` +
+        inProgress.slice(0, 10).map((w) => {
+          const s = Math.min(3, Math.max(0, ...w.reviews.map((r) => r.stage)));
+          const stars = '⭐'.repeat(s) + '☆'.repeat(3 - s);
+          return `• <b>${escapeHtml(w.wordEn)}</b> — ${escapeHtml(w.translationRu)} (${stars})`;
+        }).join('\n') +
+        (inProgress.length > 10 ? `\n<i>...и ещё ${inProgress.length - 10} слов</i>` : '') + '\n\n';
+    }
+
+    if (brandNew.length > 0) {
+      text += `⚪️ <b>Новые слова:</b>\n` +
+        brandNew.slice(0, 10).map((w) => `• <b>${escapeHtml(w.wordEn)}</b> — ${escapeHtml(w.translationRu)}`).join('\n') +
+        (brandNew.length > 10 ? `\n<i>...и ещё ${brandNew.length - 10} слов</i>` : '') + '\n\n';
+    }
+
+    text += `💡 <i>Чтобы закрепить слова, запустите опрос в меню ниже!</i>`;
+  }
+
+  await ctx.reply(text, {
     parse_mode: 'HTML',
     ...mainReplyKeyboard(lang),
   });
@@ -272,21 +334,48 @@ const showUserWords = async (ctx: Context, userId: bigint, lang: Lang) => {
 
 const showUserStats = async (ctx: Context, user: { id: bigint | number; streakCount?: number | null; doneTodayCount?: number | null }, lang: Lang) => {
   const userId = BigInt(user.id);
-  const wordCount = await prisma.word.count({ where: { userId } });
-  const reviewCount = await prisma.review.count({ where: { userId } });
+  const words = await prisma.word.findMany({
+    where: { userId },
+    select: {
+      reviews: { select: { stage: true } },
+    },
+  });
+
+  const totalWords = words.length;
+  let masteredCount = 0;
+  let inProgressCount = 0;
+  let newCount = 0;
+
+  for (const w of words) {
+    const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
+    if (maxStage >= 3) masteredCount++;
+    else if (maxStage >= 1) inProgressCount++;
+    else newCount++;
+  }
+
+  const percentMastered = totalWords > 0 ? Math.round((masteredCount / totalWords) * 100) : 0;
   const streak = user.streakCount ?? 0;
   const doneToday = user.doneTodayCount ?? 0;
+
+  const filledBlocks = Math.round(percentMastered / 10);
+  const progressBar = '🟩'.repeat(filledBlocks) + '⬜'.repeat(10 - filledBlocks);
 
   const statsText =
     lang === 'uz'
       ? `📊 <b>Sizning statistikangiz:</b>\n\n` +
-        `📚 Lug‘atdagi so‘zlar: <b>${wordCount}</b> ta\n` +
-        `🗂 Takrorlash kartalari: <b>${reviewCount}</b> ta\n` +
+        `📚 Lug‘atdagi jami so‘zlar: <b>${totalWords}</b> ta\n` +
+        `🏆 <b>Aniq bilasiz (Yodlangan):</b> <b>${masteredCount}</b> (${percentMastered}%)\n` +
+        `🟡 <b>O‘rganilmoqda:</b> <b>${inProgressCount}</b> ta\n` +
+        `⚪️ <b>Yangi so‘zlar:</b> <b>${newCount}</b> ta\n\n` +
+        `📊 <b>O‘zlashtirish darajasi:</b>\n${progressBar} ${percentMastered}%\n\n` +
         `✅ Bugun takrorlangan: <b>${doneToday}</b>\n` +
         `🔥 Kunlik ketma-ketlik: <b>${streak} kun</b>`
       : `📊 <b>Ваша статистика:</b>\n\n` +
-        `📚 Слов в словаре: <b>${wordCount}</b>\n` +
-        `🗂 Карточек для повторения: <b>${reviewCount}</b>\n` +
+        `📚 Всего слов в словаре: <b>${totalWords}</b>\n` +
+        `🏆 <b>Точно знаете (Выучено):</b> <b>${masteredCount}</b> (${percentMastered}%)\n` +
+        `🟡 <b>На изучении:</b> <b>${inProgressCount}</b>\n` +
+        `⚪️ <b>Новые слова:</b> <b>${newCount}</b>\n\n` +
+        `📊 <b>Уровень освоения словаря:</b>\n${progressBar} ${percentMastered}%\n\n` +
         `✅ Повторено сегодня: <b>${doneToday}</b>\n` +
         `🔥 Серия дней: <b>${streak} дн.</b>`;
 

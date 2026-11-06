@@ -98,7 +98,14 @@ export const createFullPracticeRuntime = (deps: {
   ) => {
     const userWords = await prisma.word.findMany({
       where: { userId },
-      select: { id: true, wordEn: true, translationRu: true },
+      select: {
+        id: true,
+        wordEn: true,
+        translationRu: true,
+        reviews: {
+          select: { stage: true, direction: true },
+        },
+      },
     });
 
     if (userWords.length === 0) {
@@ -114,8 +121,17 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
-    // Pick random target word
-    const target = userWords[Math.floor(Math.random() * userWords.length)];
+    // Filter unmastered words (where any direction has stage < 3)
+    const learningWords = userWords.filter((w) => {
+      const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
+      return maxStage < 3;
+    });
+
+    // 75% prioritize unmastered words, 25% pick from all words for refresher
+    let target = userWords[Math.floor(Math.random() * userWords.length)];
+    if (learningWords.length > 0 && Math.random() < 0.75) {
+      target = learningWords[Math.floor(Math.random() * learningWords.length)];
+    }
     if (!target) {
       return;
     }
@@ -305,18 +321,20 @@ export const createFullPracticeRuntime = (deps: {
     };
 
     // Update review schedule in database if review exists
+    let newStage = 0;
     try {
       const review = await prisma.review.findFirst({
         where: { userId, wordId: payload.currentWordId, direction: payload.direction },
       });
       if (review) {
-        await applyRating(
+        const updated = await applyRating(
           review,
           isCorrect ? 'GOOD' : 'HARD',
           isCorrect ? 'CORRECT' : 'INCORRECT',
           payload.direction,
           userGivenAnswer
         );
+        newStage = updated.stage;
       }
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (user) {
@@ -328,6 +346,29 @@ export const createFullPracticeRuntime = (deps: {
 
     const pairHtml = `<b>${escapeHtml(payload.wordEn)}</b> — <b>${escapeHtml(payload.translationRu)}</b>`;
 
+    const starCount = Math.min(3, Math.max(0, newStage));
+    const stars = '⭐'.repeat(starCount) + '☆'.repeat(3 - starCount);
+
+    let progressNote = '';
+    if (isCorrect) {
+      if (newStage >= 3) {
+        progressNote =
+          lang === 'uz'
+            ? `\n🏆 <b>So‘z to‘liq yodlandi! Uni aniq bilasiz!</b> (${stars})`
+            : `\n🏆 <b>Слово выучено! Вы точно его знаете!</b> (${stars})`;
+      } else {
+        progressNote =
+          lang === 'uz'
+            ? `\n📈 <b>Daraja:</b> ${starCount}/3 (${stars})`
+            : `\n📈 <b>Прогресс:</b> ${starCount}/3 (${stars})`;
+      }
+    } else {
+      progressNote =
+        lang === 'uz'
+          ? `\n📉 <i>Xato: so‘z yana so‘raladi!</i>`
+          : `\n📉 <i>Ошибка: слово будет повторено ещё раз!</i>`;
+    }
+
     let feedback: string;
     const isExplicitDontKnow =
       userGivenAnswer === 'Не знаю' || userGivenAnswer === 'Bilmayman' || userGivenAnswer === '?';
@@ -335,18 +376,18 @@ export const createFullPracticeRuntime = (deps: {
     if (isExplicitDontKnow) {
       feedback =
         lang === 'uz'
-          ? `💡 <b>To‘g‘ri javob:</b>\n${pairHtml}`
-          : `💡 <b>Правильный перевод:</b>\n${pairHtml}`;
+          ? `💡 <b>To‘g‘ri javob:</b>\n${pairHtml}${progressNote}`
+          : `💡 <b>Правильный перевод:</b>\n${pairHtml}${progressNote}`;
     } else if (isCorrect) {
       feedback =
         lang === 'uz'
-          ? `✅ <b>To‘g‘ri!</b>\n${pairHtml}`
-          : `✅ <b>Верно!</b>\n${pairHtml}`;
+          ? `✅ <b>To‘g‘ri!</b>\n${pairHtml}${progressNote}`
+          : `✅ <b>Верно!</b>\n${pairHtml}${progressNote}`;
     } else {
       feedback =
         lang === 'uz'
-          ? `❌ <b>Noto‘g‘ri!</b> (Sizning javobingiz: <i>${escapeHtml(userGivenAnswer)}</i>)\n💡 <b>To‘g‘ri javob:</b>\n${pairHtml}`
-          : `❌ <b>Неверно!</b> (Ваш ответ: <i>${escapeHtml(userGivenAnswer)}</i>)\n💡 <b>Правильный перевод:</b>\n${pairHtml}`;
+          ? `❌ <b>Noto‘g‘ri!</b> (Sizning javobingiz: <i>${escapeHtml(userGivenAnswer)}</i>)\n💡 <b>To‘g‘ri javob:</b>\n${pairHtml}${progressNote}`
+          : `❌ <b>Неверно!</b> (Ваш ответ: <i>${escapeHtml(userGivenAnswer)}</i>)\n💡 <b>Правильный перевод:</b>\n${pairHtml}${progressNote}`;
     }
 
     await ctx.reply(feedback, { parse_mode: 'HTML' });
