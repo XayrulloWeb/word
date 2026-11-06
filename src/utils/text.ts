@@ -19,10 +19,19 @@ export const normalizeAnswer = (text: string): string => {
 
 const stripEnglishInfinitive = (text: string): string => text.replace(/^to\s+/i, '');
 
+const normalizeCommonTypos = (text: string): string => {
+  return text
+    .replace(/[-_]+/g, ' ')
+    .replace(/\bsimetimes\b/g, 'sometimes')
+    .replace(/\bcaterpilar\b/g, 'caterpillar')
+    .replace(/\bbehav\s+yourself\b/g, 'behave yourself');
+};
+
 export const normalizeEnglish = (text: string): string => {
   const cleaned = normalizeAnswer(text);
   const withoutArticles = stripArticles(cleaned);
-  return stripEnglishInfinitive(withoutArticles);
+  const withoutInfinitive = stripEnglishInfinitive(withoutArticles);
+  return normalizeCommonTypos(withoutInfinitive);
 };
 
 export const answersEqual = (expected: string, actual: string): boolean => {
