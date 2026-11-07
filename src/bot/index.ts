@@ -38,7 +38,7 @@ import { generateSentences, saveSentences, removeSentenceAtIndex, getSentenceFor
 import { checkAutoTranslateQuota, commitAutoTranslateQuota } from '../services/translationQuota';
 import type { ReviewResult } from '../generated/prisma/client';
 import { Prisma } from '../generated/prisma/client';
-import { checkAnswer } from '../services/answerChecker';
+import { checkAnswerAsync } from '../services/answerChecker';
 import type { Rating } from '../services/reviewScheduler';
 import { createRuntimeHealthReporter } from '../utils/runtimeHealth';
 import { normalizeWhitespace } from '../utils/text';
@@ -1096,7 +1096,7 @@ bot.on('text', async (ctx) => {
         }
       }
       const direction = session.direction;
-      const { correct } = checkAnswer(direction, review.word.wordEn, review.word.translationRu, text);
+      const { correct } = await checkAnswerAsync(direction, review.word.wordEn, review.word.translationRu, text);
       const correctAnswer = direction === 'RU_TO_EN' ? review.word.wordEn : review.word.translationRu;
       await setState(BigInt(userId), 'WAITING_GRADE', {
         reviewId: session.reviewId,

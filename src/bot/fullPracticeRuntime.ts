@@ -3,7 +3,7 @@ import { Markup } from 'telegraf';
 import { prisma } from '../db/client';
 import { setState, resetState } from '../services/sessionService';
 import type { UserSession } from '../generated/prisma/client';
-import { checkAnswer } from '../services/answerChecker';
+import { checkAnswerAsync } from '../services/answerChecker';
 import { applyRating } from '../services/reviewService';
 import { recordCompletion } from '../services/userService';
 import type { Lang } from '../i18n';
@@ -596,14 +596,14 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
-    const { correct } = checkAnswer(
+    const checkRes = await checkAnswerAsync(
       payload.direction,
       payload.wordEn,
       payload.translationRu,
       trimmed
     );
 
-    await handleAnswerEvaluation(ctx, userId, lang, payload, correct, trimmed);
+    await handleAnswerEvaluation(ctx, userId, lang, payload, checkRes.correct, trimmed);
   };
 
   return {
