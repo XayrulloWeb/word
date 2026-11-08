@@ -440,9 +440,12 @@ export const createFullPracticeRuntime = (deps: {
     }
 
     if (data === 'fp_dont_know') {
-      await ctx.answerCbQuery();
       const payload = session.payload as FullPracticePayload | undefined;
-      if (!payload) return;
+      if (!payload) {
+        await ctx.answerCbQuery(lang === 'uz' ? 'Savol muddati o‘tgan' : 'Вопрос устарел');
+        return;
+      }
+      await ctx.answerCbQuery();
       await handleAnswerEvaluation(
         ctx,
         userId,
@@ -530,6 +533,14 @@ export const createFullPracticeRuntime = (deps: {
 
       if (!payload || !Array.isArray(payload.options) || idx < 0 || idx >= payload.options.length) {
         await ctx.answerCbQuery(lang === 'uz' ? 'Savol muddati o‘tgan' : 'Вопрос устарел');
+        const hintMsg =
+          lang === 'uz'
+            ? 'ℹ️ <i>Bu savol muddati o‘tgan. Yangi so‘rov boshlash uchun menyudan tugmani tanlang!</i>'
+            : 'ℹ️ <i>Этот вопрос уже неактуален (бот был обновлён). Нажмите на кнопку опроса в меню внизу, чтобы начать!</i>';
+        await ctx.reply(hintMsg, {
+          parse_mode: 'HTML',
+          ...deps.mainReplyKeyboard(lang),
+        });
         return;
       }
 
