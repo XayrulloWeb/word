@@ -32,6 +32,7 @@ export interface FullPracticePayload {
   options: string[];
   baseHeader?: string;
   hintPresses?: number;
+  recentWordIds?: number[];
   [key: string]: unknown;
 }
 
@@ -94,7 +95,8 @@ export const createFullPracticeRuntime = (deps: {
     userId: bigint,
     lang: Lang,
     stats: FullPracticeStats,
-    subMode: PracticeSubMode = 'typing'
+    subMode: PracticeSubMode = 'typing',
+    recentWordIds: number[] = []
   ) => {
     const userWords = await prisma.word.findMany({
       where: { userId },
@@ -121,16 +123,33 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
+    // Window size for recent words: e.g. min(5, userWords.length - 1)
+    const maxRecent = Math.max(1, Math.min(5, userWords.length - 1));
+    const recentSet = new Set(recentWordIds.slice(-maxRecent));
+
     // Filter unmastered words (where any direction has stage < 3)
     const learningWords = userWords.filter((w) => {
       const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
       return maxStage < 3;
     });
 
+    // Separate into unmastered pool excluding recent words
+    const nonRecentLearning = learningWords.filter((w) => !recentSet.has(w.id));
+    const poolLearning = nonRecentLearning.length > 0 ? nonRecentLearning : learningWords;
+
+    // All words pool excluding recent words
+    const nonRecentAll = userWords.filter((w) => !recentSet.has(w.id));
+    const poolAll = nonRecentAll.length > 0 ? nonRecentAll : userWords;
+
     // 75% prioritize unmastered words, 25% pick from all words for refresher
-    let target = userWords[Math.floor(Math.random() * userWords.length)];
-    if (learningWords.length > 0 && Math.random() < 0.75) {
-      target = learningWords[Math.floor(Math.random() * learningWords.length)];
+    let target: typeof userWords[0] | undefined;
+    if (poolLearning.length > 0 && Math.random() < 0.75) {
+      target = poolLearning[Math.floor(Math.random() * poolLearning.length)];
+    } else {
+      target = poolAll[Math.floor(Math.random() * poolAll.length)];
+    }
+    if (!target) {
+      target = userWords[0];
     }
     if (!target) {
       return;
@@ -150,12 +169,20 @@ export const createFullPracticeRuntime = (deps: {
 
     let options: string[] = [];
     if (subMode === 'choices') {
+      const uniqueDistractors: string[] = [];
+      const seen = new Set<string>([correctAnswer.toLowerCase().trim()]);
       const otherWords = userWords.filter((w) => w.id !== target.id);
       const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
-      const distractorAnswers = shuffledOthers
-        .slice(0, 3)
-        .map((w) => (isEnToRu ? w.translationRu : w.wordEn));
-      options = [correctAnswer, ...distractorAnswers].sort(() => 0.5 - Math.random());
+      for (const w of shuffledOthers) {
+        const text = isEnToRu ? w.translationRu : w.wordEn;
+        const norm = text.toLowerCase().trim();
+        if (!seen.has(norm)) {
+          seen.add(norm);
+          uniqueDistractors.push(text);
+          if (uniqueDistractors.length === 3) break;
+        }
+      }
+      options = [correctAnswer, ...uniqueDistractors].sort(() => 0.5 - Math.random());
     }
 
     const header =
@@ -175,6 +202,8 @@ export const createFullPracticeRuntime = (deps: {
             `Слово: ${fromFlag} <b>${escapeHtml(questionPrompt)}</b>\n\n` +
             `✍️ Напишите перевод на <b>${targetLangName}</b>:`;
 
+    const nextRecentWordIds = [...recentWordIds.slice(-maxRecent), target.id];
+
     const payload: FullPracticePayload = {
       mode: 'full_practice',
       subMode,
@@ -188,6 +217,7 @@ export const createFullPracticeRuntime = (deps: {
       options,
       baseHeader: header,
       hintPresses: 0,
+      recentWordIds: nextRecentWordIds,
     };
 
     await setState(userId, 'QUIZ_ACTIVE', {
@@ -393,7 +423,9 @@ export const createFullPracticeRuntime = (deps: {
     await ctx.reply(feedback, { parse_mode: 'HTML' });
 
     // IMMEDIATELY SEND NEXT QUESTION (Continuous!)
-    await sendNextQuestion(ctx, userId, lang, stats, payload.subMode || 'typing');
+    const currentRecent = Array.isArray(payload.recentWordIds) ? payload.recentWordIds : [];
+    const updatedRecent = [...currentRecent, payload.currentWordId];
+    await sendNextQuestion(ctx, userId, lang, stats, payload.subMode || 'typing', updatedRecent);
   };
 
   const handleFullPracticeCallback = async (
