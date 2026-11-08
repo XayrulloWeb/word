@@ -155,17 +155,14 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
-    // Direction: 50% EN -> RU, 50% RU -> EN
-    const isEnToRu = Math.random() < 0.5;
-    const direction: 'EN_TO_RU' | 'RU_TO_EN' = isEnToRu ? 'EN_TO_RU' : 'RU_TO_EN';
-    const questionPrompt = isEnToRu ? target.wordEn : target.translationRu;
-    const correctAnswer = isEnToRu ? target.translationRu : target.wordEn;
+    // Direction: Always chosen language -> English ("выбранный язык на английский")
+    const direction: 'EN_TO_RU' | 'RU_TO_EN' = 'RU_TO_EN';
+    const questionPrompt = target.translationRu;
+    const correctAnswer = target.wordEn;
 
     const questionNumber = stats.total + 1;
-    const fromFlag = isEnToRu ? '🇬🇧' : '🇷🇺';
-    const targetLangName = isEnToRu
-      ? (lang === 'uz' ? 'o‘zbekcha/ruscha' : 'русском')
-      : (lang === 'uz' ? 'inglizcha' : 'английском');
+    const fromFlag = lang === 'uz' ? '🇺🇿' : '🇷🇺';
+    const targetLangName = lang === 'uz' ? 'inglizcha' : 'английском';
 
     let options: string[] = [];
     if (subMode === 'choices') {
@@ -174,7 +171,7 @@ export const createFullPracticeRuntime = (deps: {
       const otherWords = userWords.filter((w) => w.id !== target.id);
       const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
       for (const w of shuffledOthers) {
-        const text = isEnToRu ? w.translationRu : w.wordEn;
+        const text = w.wordEn;
         const norm = text.toLowerCase().trim();
         if (!seen.has(norm)) {
           seen.add(norm);
