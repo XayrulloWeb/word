@@ -127,27 +127,63 @@ export const createFullPracticeRuntime = (deps: {
     const maxRecent = Math.max(1, Math.min(5, userWords.length - 1));
     const recentSet = new Set(recentWordIds.slice(-maxRecent));
 
-    // Filter unmastered words (where any direction has stage < 3)
-    const learningWords = userWords.filter((w) => {
+    // Categorize words into brand new (stage 0), in progress (stage 1..2), and mastered (stage >= 3)
+    const brandNewWords = userWords.filter((w) => {
       const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
-      return maxStage < 3;
+      return maxStage === 0;
     });
 
-    // Separate into unmastered pool excluding recent words
-    const nonRecentLearning = learningWords.filter((w) => !recentSet.has(w.id));
-    const poolLearning = nonRecentLearning.length > 0 ? nonRecentLearning : learningWords;
+    const inProgressWords = userWords.filter((w) => {
+      const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
+      return maxStage >= 1 && maxStage < 3;
+    });
 
-    // All words pool excluding recent words
+    const masteredWords = userWords.filter((w) => {
+      const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
+      return maxStage >= 3;
+    });
+
+    // Exclude recent words from candidate pools
+    const nonRecentBrandNew = brandNewWords.filter((w) => !recentSet.has(w.id));
+    const poolBrandNew = nonRecentBrandNew.length > 0 ? nonRecentBrandNew : brandNewWords;
+
+    const nonRecentInProgress = inProgressWords.filter((w) => !recentSet.has(w.id));
+    const poolInProgress = nonRecentInProgress.length > 0 ? nonRecentInProgress : inProgressWords;
+
+    const nonRecentMastered = masteredWords.filter((w) => !recentSet.has(w.id));
+    const poolMastered = nonRecentMastered.length > 0 ? nonRecentMastered : masteredWords;
+
     const nonRecentAll = userWords.filter((w) => !recentSet.has(w.id));
     const poolAll = nonRecentAll.length > 0 ? nonRecentAll : userWords;
 
-    // 75% prioritize unmastered words, 25% pick from all words for refresher
+    // Weight selection:
+    // When brand new words exist: 75% brand new, 15% in-progress, 10% mastered/all
+    // Otherwise: 80% in-progress, 20% mastered/all
     let target: typeof userWords[0] | undefined;
-    if (poolLearning.length > 0 && Math.random() < 0.75) {
-      target = poolLearning[Math.floor(Math.random() * poolLearning.length)];
+    const rand = Math.random();
+
+    if (poolBrandNew.length > 0) {
+      if (rand < 0.75) {
+        target = poolBrandNew[Math.floor(Math.random() * poolBrandNew.length)];
+      } else if (rand < 0.90 && poolInProgress.length > 0) {
+        target = poolInProgress[Math.floor(Math.random() * poolInProgress.length)];
+      } else if (poolMastered.length > 0) {
+        target = poolMastered[Math.floor(Math.random() * poolMastered.length)];
+      } else {
+        target = poolAll[Math.floor(Math.random() * poolAll.length)];
+      }
+    } else if (poolInProgress.length > 0) {
+      if (rand < 0.80) {
+        target = poolInProgress[Math.floor(Math.random() * poolInProgress.length)];
+      } else if (poolMastered.length > 0) {
+        target = poolMastered[Math.floor(Math.random() * poolMastered.length)];
+      } else {
+        target = poolAll[Math.floor(Math.random() * poolAll.length)];
+      }
     } else {
       target = poolAll[Math.floor(Math.random() * poolAll.length)];
     }
+
     if (!target) {
       target = userWords[0];
     }

@@ -180,6 +180,69 @@ const RUSSIAN_SYNONYMS: Record<string, string> = {
   // instead
   вместо: 'вместо этого',
   взамен: 'вместо этого',
+  // specific
+  специфичный: 'специфический',
+  особенный: 'специфический',
+  // annoyance
+  досада: 'раздражение',
+  недовольство: 'раздражение',
+  // irritation
+  гнев: 'раздражение',
+  злость: 'раздражение',
+  // landlord
+  арендодатель: 'лендлорд',
+  хозяин: 'лендлорд',
+  // torch
+  фонарик: 'фонарь',
+  факел: 'фонарь',
+  // butler
+  лакей: 'дворецкий',
+  // sun-bath
+  загар: 'солнечная ванна',
+  загорать: 'солнечная ванна',
+  // confuse
+  смутить: 'смущать',
+  смущенный: 'смущать',
+  путать: 'смущать',
+  запутать: 'смущать',
+  запутаться: 'смущать',
+  // parcel
+  бандероль: 'посылка',
+  пакет: 'посылка',
+  // bark
+  лаять: 'лай',
+  // upset
+  огорчить: 'огорчать',
+  расстраивать: 'огорчать',
+  расстроить: 'огорчать',
+  огорченный: 'огорчать',
+  расстроенный: 'огорчать',
+  // exhaust
+  истощать: 'уставать',
+  изнурять: 'уставать',
+  устать: 'уставать',
+  истощить: 'уставать',
+  // recognise
+  узнавать: 'узнать',
+  распознать: 'узнать',
+  распознавать: 'узнать',
+  признать: 'узнать',
+  // decorate
+  украсить: 'украшать',
+  декорировать: 'украшать',
+  // dairy / diary
+  дневник: 'ежедневный',
+  ежедневник: 'ежедневный',
+  // belong to
+  принадлежать: 'принадлежит к',
+  принадлежит: 'принадлежит к',
+  // come from
+  происходить: 'родом из',
+  родом: 'родом из',
+  'родом с': 'родом из',
+  // listen
+  послушать: 'слушать',
+  услышать: 'слушать',
 };
 
 const canonicalRussianStem = (token: string): string => {
@@ -292,6 +355,29 @@ const ENGLISH_SYNONYMS: Record<string, string[]> = {
   prompt: ['prompt', 'hint', 'clue', 'urge'],
   climate: ['climate', 'weather'],
   caterpillar: ['caterpillar'],
+  specific: ['specific', 'particular', 'special'],
+  annoyance: ['annoyance', 'irritation', 'vexation'],
+  irritation: ['irritation', 'annoyance', 'anger'],
+  landlord: ['landlord', 'lessor'],
+  torch: ['torch', 'flashlight', 'lamp', 'flare'],
+  butler: ['butler'],
+  'sun-bath': ['sun-bath', 'sunbath', 'sun bathing', 'sunbathing'],
+  sunbath: ['sun-bath', 'sunbath', 'sun bathing', 'sunbathing'],
+  confuse: ['confuse', 'confused', 'embarrass', 'mix up', 'puzzle'],
+  parcel: ['parcel', 'package', 'packet'],
+  bark: ['bark', 'barking'],
+  upset: ['upset', 'sadden', 'distress', 'disappoint'],
+  exhaust: ['exhaust', 'tire', 'wear out', 'drain'],
+  recognise: ['recognise', 'recognize', 'identify', 'know'],
+  recognize: ['recognise', 'recognize', 'identify', 'know'],
+  decorate: ['decorate', 'adorn', 'embellish'],
+  dairy: ['dairy', 'diary', 'daily'],
+  diary: ['dairy', 'diary', 'daily'],
+  camp: ['camp'],
+  'belong to': ['belong to', 'belong', 'belong to(sb)', 'belongs to'],
+  'come from': ['come from', 'originate', 'come from(a place)', 'comes from'],
+  listen: ['listen', 'listen to', 'hear'],
+  'listen to': ['listen', 'listen to', 'hear'],
 };
 
 export const answersEqualEnglish = (expected: string, actual: string): boolean => {
