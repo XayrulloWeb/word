@@ -105,7 +105,7 @@ export const createFullPracticeRuntime = (deps: {
         wordEn: true,
         translationRu: true,
         reviews: {
-          select: { stage: true, direction: true },
+          select: { stage: true, direction: true, lastReviewAt: true },
         },
       },
     });
@@ -123,69 +123,65 @@ export const createFullPracticeRuntime = (deps: {
       return;
     }
 
-    // Window size for recent words: e.g. min(5, userWords.length - 1)
-    const maxRecent = Math.max(1, Math.min(5, userWords.length - 1));
+    // Window size for recent words to prevent immediate repeats (at least 5-8 words)
+    const maxRecent = Math.min(8, Math.max(1, Math.floor(userWords.length * 0.3)));
     const recentSet = new Set(recentWordIds.slice(-maxRecent));
 
-    // Categorize words into brand new (stage 0), in progress (stage 1..2), and mastered (stage >= 3)
-    const brandNewWords = userWords.filter((w) => {
-      const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
-      return maxStage === 0;
+    const wordsWithMeta = userWords.map((w) => {
+      const targetReview = w.reviews.find((r) => r.direction === 'RU_TO_EN') || w.reviews[0];
+      const stage = targetReview?.stage ?? 0;
+      const lastReviewTime = targetReview?.lastReviewAt ? new Date(targetReview.lastReviewAt).getTime() : 0;
+      return {
+        ...w,
+        stage,
+        lastReviewTime,
+        isNeverReviewed: !targetReview?.lastReviewAt,
+      };
     });
 
-    const inProgressWords = userWords.filter((w) => {
-      const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
-      return maxStage >= 1 && maxStage < 3;
-    });
+    // Separate candidate words excluding recently asked words:
+    const nonRecent = wordsWithMeta.filter((w) => !recentSet.has(w.id));
+    const pool = nonRecent.length > 0 ? nonRecent : wordsWithMeta;
 
-    const masteredWords = userWords.filter((w) => {
-      const maxStage = Math.max(0, ...w.reviews.map((r) => r.stage));
-      return maxStage >= 3;
-    });
+    // Group 1: Never reviewed words (brand new words that user has not practiced yet)
+    const neverReviewed = pool.filter((w) => w.isNeverReviewed);
 
-    // Exclude recent words from candidate pools
-    const nonRecentBrandNew = brandNewWords.filter((w) => !recentSet.has(w.id));
-    const poolBrandNew = nonRecentBrandNew.length > 0 ? nonRecentBrandNew : brandNewWords;
+    // Group 2: Unmastered words in progress (stage < 3), sorted by oldest review time first
+    const inProgress = pool
+      .filter((w) => !w.isNeverReviewed && w.stage < 3)
+      .sort((a, b) => a.lastReviewTime - b.lastReviewTime);
 
-    const nonRecentInProgress = inProgressWords.filter((w) => !recentSet.has(w.id));
-    const poolInProgress = nonRecentInProgress.length > 0 ? nonRecentInProgress : inProgressWords;
+    // Group 3: Mastered words (stage >= 3), sorted by oldest review time first
+    const mastered = pool
+      .filter((w) => w.stage >= 3)
+      .sort((a, b) => a.lastReviewTime - b.lastReviewTime);
 
-    const nonRecentMastered = masteredWords.filter((w) => !recentSet.has(w.id));
-    const poolMastered = nonRecentMastered.length > 0 ? nonRecentMastered : masteredWords;
+    // All available words sorted by oldest review time
+    const allByOldest = [...pool].sort((a, b) => a.lastReviewTime - b.lastReviewTime);
 
-    const nonRecentAll = userWords.filter((w) => !recentSet.has(w.id));
-    const poolAll = nonRecentAll.length > 0 ? nonRecentAll : userWords;
-
-    // Weight selection:
-    // When brand new words exist: 75% brand new, 15% in-progress, 10% mastered/all
-    // Otherwise: 80% in-progress, 20% mastered/all
-    let target: typeof userWords[0] | undefined;
+    let target: (typeof wordsWithMeta)[0] | undefined;
     const rand = Math.random();
 
-    if (poolBrandNew.length > 0) {
-      if (rand < 0.75) {
-        target = poolBrandNew[Math.floor(Math.random() * poolBrandNew.length)];
-      } else if (rand < 0.90 && poolInProgress.length > 0) {
-        target = poolInProgress[Math.floor(Math.random() * poolInProgress.length)];
-      } else if (poolMastered.length > 0) {
-        target = poolMastered[Math.floor(Math.random() * poolMastered.length)];
-      } else {
-        target = poolAll[Math.floor(Math.random() * poolAll.length)];
-      }
-    } else if (poolInProgress.length > 0) {
-      if (rand < 0.80) {
-        target = poolInProgress[Math.floor(Math.random() * poolInProgress.length)];
-      } else if (poolMastered.length > 0) {
-        target = poolMastered[Math.floor(Math.random() * poolMastered.length)];
-      } else {
-        target = poolAll[Math.floor(Math.random() * poolAll.length)];
-      }
+    if (neverReviewed.length > 0 && rand < 0.75) {
+      // 75% pick from brand new unpracticed words (top 3 with jitter)
+      const slice = neverReviewed.slice(0, Math.min(3, neverReviewed.length));
+      target = slice[Math.floor(Math.random() * slice.length)];
+    } else if (inProgress.length > 0 && rand < 0.85) {
+      // Pick from unmastered words reviewed longest time ago (top 3)
+      const slice = inProgress.slice(0, Math.min(3, inProgress.length));
+      target = slice[Math.floor(Math.random() * slice.length)];
+    } else if (mastered.length > 0 && rand < 0.95) {
+      // Pick from mastered words reviewed longest time ago
+      const slice = mastered.slice(0, Math.min(3, mastered.length));
+      target = slice[Math.floor(Math.random() * slice.length)];
     } else {
-      target = poolAll[Math.floor(Math.random() * poolAll.length)];
+      // Pick least recently reviewed word overall
+      const slice = allByOldest.slice(0, Math.min(3, allByOldest.length));
+      target = slice[Math.floor(Math.random() * slice.length)];
     }
 
     if (!target) {
-      target = userWords[0];
+      target = wordsWithMeta[0];
     }
     if (!target) {
       return;
